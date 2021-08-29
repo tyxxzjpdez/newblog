@@ -1,5 +1,5 @@
 ---
-title: 关于std::thread的一点问题
+title: 关于std::thread初始化的一点问题
 date: 2021-08-28 19:19:44
 tags:
   - C++
