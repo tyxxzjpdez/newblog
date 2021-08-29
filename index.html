@@ -71,6 +71,159 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Linux下的进程、进程与协程" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" class="article-date">
+  <time class="dt-published" datetime="2021-08-29T20:04:28.000Z" itemprop="datePublished">2021-08-29</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/">结合源码从开销角度看Linux下的进程、进程与协程</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <h2 id="问题"><a href="#问题" class="headerlink" title="问题"></a>问题</h2><p>最近面试的时候被问了两个问题：</p>
+<ul>
+<li>进程、线程、协程的关系与区别</li>
+<li>为什么要使用线程池，相比普通的方式有什么优势？</li>
+</ul>
+<p>两个问题其实不算很难回答，我主要从开销角度讲的。但是面试官随后便问了我到底是什么开销呢？我一下就懵了。乖乖，这不看过源码谁知道，所以就有了这篇博客。</p>
+<h2 id="分析"><a href="#分析" class="headerlink" title="分析"></a>分析</h2><h3 id="进程与线程"><a href="#进程与线程" class="headerlink" title="进程与线程"></a>进程与线程</h3><p><strong>本文的内容主要基于《用“芯”探核：基于龙芯的Linux内核探索解析》以及一点点《CSAPP》的内容。</strong></p>
+<p>在Linux下新建一个进程或者线程都会调用<code>fork</code>族的系统调用，也就是<code>fork</code>,<code>vfork</code>,<code>clone</code>。他们最终都是在<code>_do_fork(struct kernel_clone_args*)</code>函数内最终具体实现 。该函数的参数比较复杂，其具体指定了不同的创建方式。这里仅仅列举以下几个：</p>
+<table>
+<thead>
+<tr>
+<th>标志名称</th>
+<th>标志含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CLONE_VM</code></td>
+<td>子进程共享父进程的<strong>地址空间和各级页表</strong></td>
+</tr>
+<tr>
+<td><code>CLONE_FS</code></td>
+<td>子进程共享父进程的文件系统上下文</td>
+</tr>
+<tr>
+<td><code>CLONE_FILES</code></td>
+<td>子进程共享父进程的打开的文件描述符表</td>
+</tr>
+<tr>
+<td><code>CLONE_SIGHAND</code></td>
+<td>子进程共享父进程的信号处理函数表</td>
+</tr>
+<tr>
+<td><code>CLONE_VFORK</code></td>
+<td>子进程执行新程序或退出之前父进程阻塞</td>
+</tr>
+<tr>
+<td><code>CLONE_THREAD</code></td>
+<td>将子进程<strong>插入父进程所在的线程组</strong></td>
+</tr>
+<tr>
+<td><code>CLONE_SETTLS</code></td>
+<td>子进程将创建自己的线程本地存储</td>
+</tr>
+</tbody></table>
+<p>而这三个系统调用大概是使用了其中几个标志</p>
+<ul>
+<li><code>fork</code>函数没有特殊标志</li>
+<li><code> vfork</code>则有<code>CLONE_VFORK</code>和<code>CLONE_VM</code>标志</li>
+<li><code>clone</code>一般用作创建线程。我们知道一般情况下<code>std::thread</code>创建线程的方式是依赖于pthread动态链接库的（ 源码上赫然写着<code>pthread_create</code>，而且使用命令行编译链接，不加上-lpthread也会链接错）。而它的底层实现使用了如下标志<code>CLONE_VM</code>、<code>CLONE_FS</code>、<code>CLONE_FILES</code>、<code>CLONE_SIGNAL</code>、<code>CLONE_SETTLS</code>、<code>CLONE_PARENT_SETTID</code>、<code>CLONE_CHILD_CLEARTID</code>、<code>CLONE_SYSVSEM</code>。所以Pthread库创建出来的线程<strong>共享父进程的地址空间、文件系统上下文、文件描述符、信号及其处理函数、SysVIPC信号量取消队列</strong>，和父进程处于同一线程组，创建自己的线程本地存储，将子进程的PID返回给调用者的<code>parent_tidptr</code>字段，并在执行新程序或退出时清空<code>child_tidptr</code>字段同时唤醒等待该事件的进程。</li>
+</ul>
+<p>其实从这里我们便可见一斑了。线程比进程的创建多了很多标志，而且这些标志大多是声明自己与父进程共享一些资源。也就是说从开销来说，相比一般的进程，线程就是共享代替创建，所以就少了很多新建与维护代价。我们以<code>CLONE_VM</code>这个标志为例简单地过一遍代码（内核版本5.2）：</p>
+<p>首先是<code>_do_fork</code></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">long</span> _do_fork(<span class="keyword">unsigned</span> <span class="keyword">long</span> clone_flags,</span><br><span class="line">	      <span class="keyword">unsigned</span> <span class="keyword">long</span> stack_start,</span><br><span class="line">	      <span class="keyword">unsigned</span> <span class="keyword">long</span> stack_size,</span><br><span class="line">	      <span class="keyword">int</span> __user *parent_tidptr,</span><br><span class="line">	      <span class="keyword">int</span> __user *child_tidptr,</span><br><span class="line">	      <span class="keyword">unsigned</span> <span class="keyword">long</span> tls)</span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">//...</span></span><br><span class="line">p = <span class="built_in">copy_process</span>(clone_flags, stack_start, stack_size, parent_tidptr,</span><br><span class="line">			 child_tidptr, <span class="literal">NULL</span>, trace, tls, NUMA_NO_NODE);</span><br><span class="line">	<span class="comment">//...</span></span><br><span class="line">	pid = <span class="built_in">get_task_pid</span>(p, PIDTYPE_PID);</span><br><span class="line">	nr = <span class="built_in">pid_vnr</span>(pid);</span><br><span class="line"><span class="comment">//...</span></span><br><span class="line">	<span class="keyword">return</span> nr;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>copy_process负责对进程数据结构<code>task_struct</code>根据标志进行拷贝。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> __latent_entropy struct task_struct *<span class="title">copy_process</span><span class="params">(</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">unsigned</span> <span class="keyword">long</span> clone_flags,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">unsigned</span> <span class="keyword">long</span> stack_start,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">unsigned</span> <span class="keyword">long</span> stack_size,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">int</span> __user *parent_tidptr,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">int</span> __user *child_tidptr,</span></span></span><br><span class="line"><span class="params"><span class="function">					struct pid *pid,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">int</span> trace,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">unsigned</span> <span class="keyword">long</span> tls,</span></span></span><br><span class="line"><span class="params"><span class="function">					<span class="keyword">int</span> node)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="comment">//...</span></span><br><span class="line">    <span class="comment">// 拷贝现有task_struct，返回局部变量p</span></span><br><span class="line">    p = <span class="built_in">dup_task_struct</span>(current, node);</span><br><span class="line">    <span class="comment">//...</span></span><br><span class="line">    retval = <span class="built_in">copy_semundo</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_security;</span><br><span class="line">	retval = <span class="built_in">copy_files</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_semundo;</span><br><span class="line">	retval = <span class="built_in">copy_fs</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_files;</span><br><span class="line">	retval = <span class="built_in">copy_sighand</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_fs;</span><br><span class="line">	retval = <span class="built_in">copy_signal</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_sighand;</span><br><span class="line">	retval = <span class="built_in">copy_mm</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_signal;</span><br><span class="line">	retval = <span class="built_in">copy_namespaces</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_mm;</span><br><span class="line">	retval = <span class="built_in">copy_io</span>(clone_flags, p);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_namespaces;</span><br><span class="line">	retval = <span class="built_in">copy_thread_tls</span>(clone_flags, stack_start, stack_size, p, tls);</span><br><span class="line">	<span class="keyword">if</span> (retval)</span><br><span class="line">		<span class="keyword">goto</span> bad_fork_cleanup_io;</span><br><span class="line">    <span class="comment">//..</span></span><br></pre></td></tr></table></figure>
+
+<p>接下来进入<code>copy_mm</code>，看标志位究竟如何影响拷贝</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">int</span> <span class="title">copy_mm</span><span class="params">(<span class="keyword">unsigned</span> <span class="keyword">long</span> clone_flags, struct task_struct *tsk)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="comment">//...</span></span><br><span class="line">    oldmm = current-&gt;mm;</span><br><span class="line">	<span class="keyword">if</span> (!oldmm)</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">	<span class="comment">//...</span></span><br><span class="line">	<span class="keyword">if</span> (clone_flags &amp; CLONE_VM) &#123;</span><br><span class="line">		<span class="built_in">mmget</span>(oldmm);</span><br><span class="line">		mm = oldmm;</span><br><span class="line">		<span class="keyword">goto</span> good_mm;</span><br><span class="line">	&#125;</span><br><span class="line">	retval = -ENOMEM;</span><br><span class="line">	mm = <span class="built_in">dup_mm</span>(tsk, current-&gt;mm);</span><br><span class="line">	<span class="keyword">if</span> (!mm)</span><br><span class="line">		<span class="keyword">goto</span> fail_nomem;</span><br><span class="line">good_mm:</span><br><span class="line">	tsk-&gt;mm = mm;</span><br><span class="line">	tsk-&gt;active_mm = mm;</span><br><span class="line">	<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">fail_nomem:</span><br><span class="line">	<span class="keyword">return</span> retval;</span><br></pre></td></tr></table></figure>
+
+<p> 这里就已经很能说明问题了，如果有了<code>CLONE_VM</code>标志就直接指向相同的指针，代价仅为一次赋值而已，但是如果没有这个标志的话，就要调用<code>dup_mm</code>了，即使在COW（写时复制）的情况下，可以不复制内存页面mmap，但是至少也必须得复制页表，否则压根没有办法实现写时复制了嘛。</p>
+<h3 id="线程与协程"><a href="#线程与协程" class="headerlink" title="线程与协程"></a>线程与协程</h3><p>有急事。待续。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" data-id="cksx8zi8j00000onp7xhxbdmx" data-title="结合源码从开销角度看Linux下的进程、进程与协程" class="article-share-link">Share</a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/Linux/" rel="tag">Linux</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/coroutine/" rel="tag">coroutine</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/process/" rel="tag">process</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/thread/" rel="tag">thread</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
+    <article id="post-hello-world" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/newblog/2021/08/29/hello-world/" class="article-date">
+  <time class="dt-published" datetime="2021-08-29T13:27:30.657Z" itemprop="datePublished">2021-08-29</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/newblog/2021/08/29/hello-world/">Hello World</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>Welcome to <a target="_blank" rel="noopener" href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a target="_blank" rel="noopener" href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a target="_blank" rel="noopener" href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a target="_blank" rel="noopener" href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/writing.html">Writing</a></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/server.html">Server</a></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/generating.html">Generating</a></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/hello-world/" data-id="cksx8zi8q00030onp17m19ddx" data-title="Hello World" class="article-share-link">Share</a>
+      
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
     <article id="post-to-do-list" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
   <div class="article-meta">
     <a href="/newblog/2021/08/28/to-do-list/" class="article-date">
@@ -105,7 +258,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="cksvvhg410005zenu2zm9gkkz" data-title="计划表" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="cksx8zi8t00070onp2lgg8gde" data-title="计划表" class="article-share-link">Share</a>
       
       
       
@@ -133,7 +286,7 @@
         
   
     <h1 itemprop="name">
-      <a class="p-name article-title" href="/newblog/2021/08/28/Problem-about-std-thread/">关于std::thread的一点问题</a>
+      <a class="p-name article-title" href="/newblog/2021/08/28/Problem-about-std-thread/">关于std::thread初始化的一点问题</a>
     </h1>
   
 
@@ -193,63 +346,12 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="cksvvhg3s0000zenuchjk9kli" data-title="关于std::thread的一点问题" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="cksx8zi8n00010onp1qm5bi5c" data-title="关于std::thread初始化的一点问题" class="article-share-link">Share</a>
       
       
       
   <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/C/" rel="tag">C++</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/multi-thread/" rel="tag">multi-thread</a></li></ul>
 
-    </footer>
-  </div>
-  
-</article>
-
-
-
-  
-    <article id="post-hello-world" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
-  <div class="article-meta">
-    <a href="/newblog/2021/08/28/hello-world/" class="article-date">
-  <time class="dt-published" datetime="2021-08-28T14:21:46.655Z" itemprop="datePublished">2021-08-28</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="p-name article-title" href="/newblog/2021/08/28/hello-world/">Hello World</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="e-content article-entry" itemprop="articleBody">
-      
-        <p>Welcome to <a target="_blank" rel="noopener" href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a target="_blank" rel="noopener" href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a target="_blank" rel="noopener" href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a target="_blank" rel="noopener" href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
-<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
-
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/writing.html">Writing</a></p>
-<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/server.html">Server</a></p>
-<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/generating.html">Generating</a></p>
-<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/hello-world/" data-id="cksvvhg3x0001zenu34ty1bu1" data-title="Hello World" class="article-share-link">Share</a>
-      
-      
-      
     </footer>
   </div>
   
@@ -285,7 +387,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="cksvvhg400004zenu0vlj2ods" data-title="C++模板" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="cksx8zi8s00050onp044r5lin" data-title="C++模板" class="article-share-link">Share</a>
       
       
       
@@ -332,7 +434,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="cksvvhg3z0003zenu2k4h6eg7" data-title="全新的开始" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="cksx8zi8r00040onp1ji0dlos" data-title="全新的开始" class="article-share-link">Share</a>
       
       
       
@@ -359,7 +461,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/C/" rel="tag">C++</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/multi-thread/" rel="tag">multi-thread</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/roast/" rel="tag">roast</a></li></ul>
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/C/" rel="tag">C++</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/Linux/" rel="tag">Linux</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/coroutine/" rel="tag">coroutine</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/multi-thread/" rel="tag">multi-thread</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/process/" rel="tag">process</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/roast/" rel="tag">roast</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/thread/" rel="tag">thread</a></li></ul>
     </div>
   </div>
 
@@ -369,7 +471,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/newblog/tags/C/" style="font-size: 20px;">C++</a> <a href="/newblog/tags/multi-thread/" style="font-size: 10px;">multi-thread</a> <a href="/newblog/tags/roast/" style="font-size: 20px;">roast</a>
+      <a href="/newblog/tags/C/" style="font-size: 20px;">C++</a> <a href="/newblog/tags/Linux/" style="font-size: 10px;">Linux</a> <a href="/newblog/tags/coroutine/" style="font-size: 10px;">coroutine</a> <a href="/newblog/tags/multi-thread/" style="font-size: 10px;">multi-thread</a> <a href="/newblog/tags/process/" style="font-size: 10px;">process</a> <a href="/newblog/tags/roast/" style="font-size: 20px;">roast</a> <a href="/newblog/tags/thread/" style="font-size: 10px;">thread</a>
     </div>
   </div>
 
@@ -391,23 +493,23 @@
       <ul>
         
           <li>
+            <a href="/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/">结合源码从开销角度看Linux下的进程、进程与协程</a>
+          </li>
+        
+          <li>
+            <a href="/newblog/2021/08/29/hello-world/">Hello World</a>
+          </li>
+        
+          <li>
             <a href="/newblog/2021/08/28/to-do-list/">计划表</a>
           </li>
         
           <li>
-            <a href="/newblog/2021/08/28/Problem-about-std-thread/">关于std::thread的一点问题</a>
-          </li>
-        
-          <li>
-            <a href="/newblog/2021/08/28/hello-world/">Hello World</a>
+            <a href="/newblog/2021/08/28/Problem-about-std-thread/">关于std::thread初始化的一点问题</a>
           </li>
         
           <li>
             <a href="/newblog/2021/08/27/template/">C++模板</a>
-          </li>
-        
-          <li>
-            <a href="/newblog/2021/08/27/new-start/">全新的开始</a>
           </li>
         
       </ul>
