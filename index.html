@@ -185,7 +185,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/31/linux-shell-%E5%B8%B8%E7%94%A8%E5%91%BD%E4%BB%A4%E9%9B%86%E9%94%A6/" data-id="ckszs1djx00031nwsdz8favqt" data-title="Linux shell 常用命令集锦" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/31/linux-shell-%E5%B8%B8%E7%94%A8%E5%91%BD%E4%BB%A4%E9%9B%86%E9%94%A6/" data-id="ckt4a8ca2000313rl613ihwfs" data-title="Linux shell 常用命令集锦" class="article-share-link">Share</a>
       
       
       
@@ -282,12 +282,18 @@
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">int</span> <span class="title">copy_mm</span><span class="params">(<span class="keyword">unsigned</span> <span class="keyword">long</span> clone_flags, struct task_struct *tsk)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    <span class="comment">//...</span></span><br><span class="line">    oldmm = current-&gt;mm;</span><br><span class="line">	<span class="keyword">if</span> (!oldmm)</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">	<span class="comment">//...</span></span><br><span class="line">	<span class="keyword">if</span> (clone_flags &amp; CLONE_VM) &#123;</span><br><span class="line">		<span class="built_in">mmget</span>(oldmm);</span><br><span class="line">		mm = oldmm;</span><br><span class="line">		<span class="keyword">goto</span> good_mm;</span><br><span class="line">	&#125;</span><br><span class="line">	retval = -ENOMEM;</span><br><span class="line">	mm = <span class="built_in">dup_mm</span>(tsk, current-&gt;mm);</span><br><span class="line">	<span class="keyword">if</span> (!mm)</span><br><span class="line">		<span class="keyword">goto</span> fail_nomem;</span><br><span class="line">good_mm:</span><br><span class="line">	tsk-&gt;mm = mm;</span><br><span class="line">	tsk-&gt;active_mm = mm;</span><br><span class="line">	<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">fail_nomem:</span><br><span class="line">	<span class="keyword">return</span> retval;</span><br></pre></td></tr></table></figure>
 
 <p> 这里就已经很能说明问题了，如果有了<code>CLONE_VM</code>标志就直接指向相同的指针，代价仅为一次赋值而已，但是如果没有这个标志的话，就要调用<code>dup_mm</code>了，即使在COW（写时复制）的情况下，可以不复制内存页面mmap，但是至少也必须得复制页表，否则压根没有办法实现写时复制了嘛。</p>
-<h3 id="线程与协程"><a href="#线程与协程" class="headerlink" title="线程与协程"></a>线程与协程</h3><p>最大的优点是需要维护的状态少，切换代价小。所以应当直接适用于高并发。一旦有了协程，不再需要考虑不同请求对多线程的复用，直接新建一个协程多方便，所以也就降低了编程难度。其实协程对线程的占用类似于线程对cpu的占用</p>
-<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3>
+<h3 id="线程与协程"><a href="#线程与协程" class="headerlink" title="线程与协程"></a>线程与协程</h3><p>看过一个简单的<a target="_blank" rel="noopener" href="https://github.com/cloudwu/coroutine">协程实现</a>。简单来说就是实现了一个拥有单个长时存在的共享栈和若干个动态大小的私密栈，并且使用<code>getcontext, setcontext</code>等函数进行上下文的切换的这么一个协程。由于调度器是用户设计的，所以切换自由，甚至可以设计实现一个yield函数，以进行主动的切换。</p>
+<p>它的创建和切换代价极小，我们可以从<code>getcontext, setcontext</code>这些函数维护的<code>ucontext_t</code>数据结构就可以看出来，可以使用<code>man getcontext</code>可以查看该数据结构的成员：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">ucontext_t</span> &#123;</span></span><br><span class="line">               <span class="class"><span class="keyword">struct</span> <span class="title">ucontext_t</span> *<span class="title">uc_link</span>;</span></span><br><span class="line">               <span class="keyword">sigset_t</span>          uc_sigmask;</span><br><span class="line">               <span class="keyword">stack_t</span>           uc_stack;</span><br><span class="line">               <span class="keyword">mcontext_t</span>        uc_mcontext;</span><br><span class="line">               ...</span><br><span class="line">           &#125; <span class="keyword">ucontext_t</span>;</span><br></pre></td></tr></table></figure>
+
+<p><code>mcontext_t</code>这一类型与具体硬件实现有关，可以认为是切换执行流的最小开销。而此外，<code>uc_link</code>一般与<code>makecontext</code>有关，指的是当前执行流终止之后切换的上下文的指针。<code>uc_stack</code>维护栈信息，一般主要维护栈顶和栈大小即可。最后是<code>uc_sigmask</code>，它是一个信号的掩码，表示屏蔽信号集合。所以综上，除了与机器相关的寄存器维护代价以及信号掩码的维护代价（信号掩码的数据结构较大，在我的机器上大概有128字节）以外，仅仅只有几个字节的拷贝代价，不需要陷入内核，没有任何内核维护状态的代价，因此不管是创建还是切换都是超轻量。</p>
+<p>因此协程的最大的优点是需要维护的状态少，因此切换代价小。所以应当直接适用于高并发。一旦有了它，就不再需要考虑不同请求对多线程的复用（当然还是需要有这部分代码的，但是例如go语言可以直接被封装好，一个语句就可以创建协程）所以也因此降低了编程难度。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>所以，简单来说，为了更好地使用多处理器以实现真正的并行，同时考虑到这时一般多个执行流应该是相互协作的，因此可以设计为某些资源共享，因此有了线程。然后由于某些业务需求，需要支持高并发，这时线程的创建以及切换代价就成为了瓶颈。这时更加轻量级的协程便应运而生。</p>
+
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" data-id="ckszs1djq00001nws21mwf2hf" data-title="结合源码从开销角度看Linux下的进程、进程与协程" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" data-id="ckt4a8c9u000013rlaqq76mya" data-title="结合源码从开销角度看Linux下的进程、进程与协程" class="article-share-link">Share</a>
       
       
       
@@ -335,7 +341,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="ckszs1dk100071nwscp4p50u9" data-title="计划表" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="ckt4a8ca5000713rl1p9c7i38" data-title="计划表" class="article-share-link">Share</a>
       
       
       
@@ -423,7 +429,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="ckszs1dju00011nwsfk42cfx4" data-title="关于std::thread初始化的一点问题" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="ckt4a8c9z000113rl9lk987fy" data-title="关于std::thread初始化的一点问题" class="article-share-link">Share</a>
       
       
       
@@ -464,7 +470,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="ckszs1djz00051nwsbko47ga4" data-title="C++模板" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="ckt4a8ca4000513rlax5m7y2p" data-title="C++模板" class="article-share-link">Share</a>
       
       
       
@@ -511,7 +517,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="ckszs1djy00041nws37v00s25" data-title="全新的开始" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="ckt4a8ca3000413rlda2ic2xd" data-title="全新的开始" class="article-share-link">Share</a>
       
       
       
