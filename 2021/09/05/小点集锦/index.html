@@ -6,15 +6,15 @@
   
   <title>小点集锦 | Tyxxzjpdez&#39;s Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-  <meta name="description" content="主要记录一些有点意思但又没有必要为此写新博客的一些点  迭代器的失效一般与容器类型相关，详见C++迭代器失效的几种情况总结。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见c++之你真的了解vector的erase吗 gcc编译链接的时候使用-v参数，可以显示具体的详细过程。我们可以发现最">
+  <meta name="description" content="主要记录一些有点意思但又没有必要为此写新博客的一些点   迭代器的失效一般与容器类型相关，详见C++迭代器失效的几种情况总结。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见c++之你真的了解vector的erase吗   gcc编译链接的时候使用-v参数，可以显示具体的详细过程。我们可以">
 <meta property="og:type" content="article">
 <meta property="og:title" content="小点集锦">
 <meta property="og:url" content="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/index.html">
 <meta property="og:site_name" content="Tyxxzjpdez&#39;s Blog">
-<meta property="og:description" content="主要记录一些有点意思但又没有必要为此写新博客的一些点  迭代器的失效一般与容器类型相关，详见C++迭代器失效的几种情况总结。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见c++之你真的了解vector的erase吗 gcc编译链接的时候使用-v参数，可以显示具体的详细过程。我们可以发现最">
+<meta property="og:description" content="主要记录一些有点意思但又没有必要为此写新博客的一些点   迭代器的失效一般与容器类型相关，详见C++迭代器失效的几种情况总结。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见c++之你真的了解vector的erase吗   gcc编译链接的时候使用-v参数，可以显示具体的详细过程。我们可以">
 <meta property="og:locale" content="en_US">
 <meta property="article:published_time" content="2021-09-05T21:10:28.000Z">
-<meta property="article:modified_time" content="2021-09-11T13:11:28.801Z">
+<meta property="article:modified_time" content="2021-09-15T07:40:43.288Z">
 <meta property="article:author" content="John Doe">
 <meta property="article:tag" content="notes">
 <meta name="twitter:card" content="summary">
@@ -98,15 +98,24 @@
       
         <p>主要记录一些有点意思但又没有必要为此写新博客的一些点</p>
 <ol>
-<li>迭代器的失效一般与容器类型相关，详见<a target="_blank" rel="noopener" href="https://www.cnblogs.com/fnlingnzb-learner/p/9300073.html">C++迭代器失效的几种情况总结</a>。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见<a target="_blank" rel="noopener" href="https://www.cnblogs.com/chaohacker/p/13024357.html">c++之你真的了解vector的erase吗</a></li>
-<li><code>gcc</code>编译链接的时候使用<code>-v</code>参数，可以显示具体的详细过程。我们可以发现最后一步并没有直接使用<code>ld</code>，而是使用了<code>collect2</code>，它主要是为了实现main函数开始前以及结束后的一些函数的注册。详见<a target="_blank" rel="noopener" href="http://www.wanglianghome.org/2011/04/14/collect2/">collect2</a>以及<a target="_blank" rel="noopener" href="https://gcc.gnu.org/onlinedocs/gccint/Collect2.html">官方文档</a>，也可以使用<code>info gccint-11 'collect2'</code>查看离线的官方文档。</li>
-<li>数据库加间隙锁的本质是因为当本条满足条件，那最多它的相邻的两个区间也会满足条件，当这些所有间隙都被锁了以后，才不会出现幻读，因为要满足之前条件的insert必然在上面的所有间隙内。（当然以上是在查询为索引的情况下）</li>
+<li>
+<p>迭代器的失效一般与容器类型相关，详见<a target="_blank" rel="noopener" href="https://www.cnblogs.com/fnlingnzb-learner/p/9300073.html">C++迭代器失效的几种情况总结</a>。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见<a target="_blank" rel="noopener" href="https://www.cnblogs.com/chaohacker/p/13024357.html">c++之你真的了解vector的erase吗</a></p>
+</li>
+<li>
+<p><code>gcc</code>编译链接的时候使用<code>-v</code>参数，可以显示具体的详细过程。我们可以发现最后一步并没有直接使用<code>ld</code>，而是使用了<code>collect2</code>，它主要是为了实现main函数开始前以及结束后的一些函数的注册。详见<a target="_blank" rel="noopener" href="http://www.wanglianghome.org/2011/04/14/collect2/">collect2</a>以及<a target="_blank" rel="noopener" href="https://gcc.gnu.org/onlinedocs/gccint/Collect2.html">官方文档</a>，也可以使用<code>info gccint-11 'collect2'</code>查看离线的官方文档。</p>
+</li>
+<li>
+<p>数据库加间隙锁的本质是因为当本条满足条件，那最多它的相邻的两个区间也会满足条件，当这些所有间隙都被锁了以后，才不会出现幻读，因为要满足之前条件的insert必然在上面的所有间隙内。（当然以上是在查询为索引的情况下）</p>
+</li>
+<li>
+<p>逻辑上不要认为因为需要epoll的边沿触发所以才将打开文件属性设置为非阻塞。而应当反过来，考虑到IO的复杂性，我们希望在epoll的线程中<strong>为了公平要保持忙碌</strong>，不要陷入某个IO阻塞使得其他IO饥饿，所以我们要设计一个非阻塞的多路复用模型（本质上其实也就是使得事件响应机制<strong>变得更加细粒度化</strong>）。一般非阻塞我们都会读到出现EAGAIN错误为止，而这相当于修改了打开文件的状态。所以我们希望epoll不要对IO的所有状态都返回事件，而应当仅仅在打开文件的状态由不可用到可用才返回事件。也即边沿触发是对多路IO复用的非阻塞版本的额外支持。</p>
+</li>
 </ol>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cktft4yww000b1akuao9j4z0w" data-title="小点集锦" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cktl7314k000bz9qj092v7eme" data-title="小点集锦" class="article-share-link">Share</a>
       
       
       
