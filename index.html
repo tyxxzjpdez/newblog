@@ -100,13 +100,12 @@
 <h2 id="调度类">调度类</h2>
 <h3 id="公平调度类：CFS策略">公平调度类：CFS策略</h3>
 <p>本质上，完全公平算法就是<strong>希望让每个执行单位获得相同的执行时间</strong>。如果我们将优先级考虑进来，就可以这样描述：</p>
-<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">我们首先定义调度周期为将所有处于TASK_RUNNING状态的进程都调度一遍的时间，那每个进程实际应当分配的时间片应当满足下面的公式：</span><br><span class="line">                                                   </span><br><span class="line">                                                分配给进程的运行时间 = 调度周期 * 进程权重 / 所有进程权重之和</span><br></pre></td></tr></table></figure>
+<p>我们首先定义调度周期为将所有处于TASK_RUNNING状态的进程都调度一遍的时间，那每个进程实际应当分配的时间片应当满足下面的公式：</p>
+<p>​                                         <code>分配给进程的运行时间 = 调度周期 * 进程权重 / 所有进程权重之和</code></p>
 <p>以上的公式是相当符合直觉的，简单来说其实就是每个进程的时间片大小与进程权重成正比。所以一个很简单的实现方式就是，直接按照上面的方式固定时间片让程序运行给定时间然后被抢占。具体实现可以利用时钟定期触发的中断记录当前进程此次调度执行的时间，并在发现累计超过给定时间片的时候将其睡眠，调入其他进程。这确实是一种简单有效的方式，实际上Linux也大概是在此基础上进行优化的。其中比较值得注意的是下面两个问题：</p>
 <ol>
 <li>
-<p><strong>如何设计进程的权重</strong>？如果是等差数列很容易导致优先级较高的两级之间与优先级较低的两级之间差距悬殊。举个例子，不是一般性，假设相邻优先级之间差1，比如现在有几个等待调度的进程的优先级是100，99，3，2。明明第一二的两个进程和第三四的两个进程都各自优先级只相差1，但是加权比例却很悬殊，也就是100/（100+99+3+2）与99/（100+99+3+2）很接近，但是3/（100+99+3+2）与2/（100+99+3+2）虽然绝对差距一致，但是前者相对比后者却多运行了一半时间。这不符合我们希望的优先级的设定，我们希望优先级n+1的进程比优先级n的进程CPU资源仅相差10%，所以我们显然应当设计为等比数列，所以它应当满足下式：</p>
-<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">1/(1+1*X) = 45%    =&gt;  X = 55/45 = 1.222</span><br></pre></td></tr></table></figure>
-<p>所以综上我们可以权重使得相邻权重成1.222倍比重，实际Linux大概是在1.24到1.25之间。</p>
+<p><strong>如何设计进程的权重</strong>？如果是等差数列很容易导致优先级较高的两级之间与优先级较低的两级之间差距悬殊。举个例子，不是一般性，假设相邻优先级之间差1，比如现在有几个等待调度的进程的优先级是100，99，3，2。明明第一二的两个进程和第三四的两个进程都各自优先级只相差1，但是加权比例却很悬殊，也就是100/（100+99+3+2）与99/（100+99+3+2）很接近，但是3/（100+99+3+2）与2/（100+99+3+2）虽然绝对差距一致，但是前者相对比后者却多运行了一半时间。这不符合我们希望的优先级的设定，我们希望优先级n+1的进程比优先级n的进程CPU资源仅相差10%，所以我们显然应当设计为等比数列，所以它应当满足公式<code>1/(1+1*X) = 45%    =&gt;  X = 55/45 = 1.222</code>。所以综上我们可以权重使得相邻权重成1.222倍比重，实际Linux大概是在1.24到1.25之间。</p>
 </li>
 <li>
 <p>如果确定要抢占，那<strong>应当将执行权交给谁呢</strong>？而且就算当前执行的进程还没用尽时间片，就一定不将它切换出去吗，如果<strong>有其他进程距离希望的时间片长度差距更远该怎么办呢</strong>？为了解决以上的问题，内核给每个进程维护了一个vruntime的变量，它是实际运行时间根据优先级权重归一化之后的虚拟运行时间。对于上面的第一个问题，我们直接选择vruntime最小的进程即可（考虑到进程频繁的创建和终止，所以采用红黑树进行维护）。而对于后面的问题，我们设计一个粒度值，如果当前进程的vruntime仅仅比最小的vruntime多出少于该粒度值的大小，那就不需要重新调度，否则就需要调度。</p>
@@ -122,7 +121,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/" data-id="cktr5owas000dzzm8gvfj9jlx" data-title="Linux的进程调度" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/" data-id="cktr61qh2000dy9m9ehuacdgq" data-title="Linux的进程调度" class="article-share-link">Share</a>
       
       
       
@@ -266,7 +265,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/09/%E5%A4%9A%E6%A0%B8%E7%BC%96%E7%A8%8B/" data-id="cktr5owap000azzm84xnv73b8" data-title="多核编程" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/09/%E5%A4%9A%E6%A0%B8%E7%BC%96%E7%A8%8B/" data-id="cktr61qgz000ay9m9b1mp6d71" data-title="多核编程" class="article-share-link">Share</a>
       
       
       
@@ -354,7 +353,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/09/gdb%E5%B8%B8%E7%94%A8%E8%B0%83%E8%AF%95%E6%8C%87%E4%BB%A4/" data-id="cktr5owak0003zzm827l8hrwt" data-title="gdb常用调试指令" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/09/gdb%E5%B8%B8%E7%94%A8%E8%B0%83%E8%AF%95%E6%8C%87%E4%BB%A4/" data-id="cktr61qgu0003y9m9d6oydr97" data-title="gdb常用调试指令" class="article-share-link">Share</a>
       
       
       
@@ -429,7 +428,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cktr5owaq000bzzm83j16314n" data-title="小点集锦" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cktr61qh0000by9m9bga3cp3a" data-title="小点集锦" class="article-share-link">Share</a>
       
       
       
@@ -572,7 +571,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/31/linux-shell-%E5%B8%B8%E7%94%A8%E5%91%BD%E4%BB%A4%E9%9B%86%E9%94%A6/" data-id="cktr5owal0004zzm84gbyhgom" data-title="Linux shell 常用命令集锦" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/31/linux-shell-%E5%B8%B8%E7%94%A8%E5%91%BD%E4%BB%A4%E9%9B%86%E9%94%A6/" data-id="cktr61qgv0004y9m9bgcx61oa" data-title="Linux shell 常用命令集锦" class="article-share-link">Share</a>
       
       
       
@@ -683,7 +682,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" data-id="cktr5owad0000zzm82arg419w" data-title="结合源码从开销角度看Linux下的进程、进程与协程" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/29/Linux%E4%B8%8B%E7%9A%84%E8%BF%9B%E7%A8%8B%E3%80%81%E8%BF%9B%E7%A8%8B%E4%B8%8E%E5%8D%8F%E7%A8%8B/" data-id="cktr61qgo0000y9m9g2tvhqdk" data-title="结合源码从开销角度看Linux下的进程、进程与协程" class="article-share-link">Share</a>
       
       
       
@@ -733,7 +732,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="cktr5owao0008zzm81ngg75f8" data-title="计划表" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/to-do-list/" data-id="cktr61qgy0008y9m9fxgnhy95" data-title="计划表" class="article-share-link">Share</a>
       
       
       
@@ -827,7 +826,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="cktr5owah0001zzm897i54xg7" data-title="关于std::thread初始化的一点问题" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/28/Problem-about-std-thread/" data-id="cktr61qgs0001y9m9baozeggk" data-title="关于std::thread初始化的一点问题" class="article-share-link">Share</a>
       
       
       
@@ -870,7 +869,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="cktr5owan0007zzm80flk6rzk" data-title="C++模板" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/template/" data-id="cktr61qgy0007y9m9fmtm8bgx" data-title="C++模板" class="article-share-link">Share</a>
       
       
       
@@ -917,7 +916,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="cktr5owam0005zzm85lx70t69" data-title="全新的开始" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/08/27/new-start/" data-id="cktr61qgw0005y9m92xxh2is0" data-title="全新的开始" class="article-share-link">Share</a>
       
       
       
