@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>Linux的进程调度 | Tyxxzjpdez&#39;s Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="本文对Linux的进程调度做简单的总结，后续会随着理解的加深不断更新。本文的大部分内容基于《用“芯”探核：基于龙芯的Linux内核探索解析》，内核版本也依据书本为v5.4.x。 简介 ​		调度核心主要负责周期性时钟处理和进程切换，而调度类（目前主要包括实时调度类rt_sched_class，公平调度类fair_sched_class和空闲调度类idle_sched_class）主要负责进程组织和">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Linux的进程调度">
+<meta property="og:url" content="http://tyxxzjpdez.github.io/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/index.html">
+<meta property="og:site_name" content="Tyxxzjpdez&#39;s Blog">
+<meta property="og:description" content="本文对Linux的进程调度做简单的总结，后续会随着理解的加深不断更新。本文的大部分内容基于《用“芯”探核：基于龙芯的Linux内核探索解析》，内核版本也依据书本为v5.4.x。 简介 ​		调度核心主要负责周期性时钟处理和进程切换，而调度类（目前主要包括实时调度类rt_sched_class，公平调度类fair_sched_class和空闲调度类idle_sched_class）主要负责进程组织和">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2021-09-19T17:49:17.000Z">
+<meta property="article:modified_time" content="2021-09-19T11:48:22.041Z">
+<meta property="article:author" content="John Doe">
+<meta property="article:tag" content="Linux">
+<meta name="twitter:card" content="summary">
+  
+    <link rel="alternate" href="/newblog/atom.xml" title="Tyxxzjpdez's Blog" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/newblog/favicon.png">
+  
+  
+    
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-source-code-pro@0.0.71/index.min.css">
+
+  
+  
+<link rel="stylesheet" href="/newblog/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/newblog/fancybox/jquery.fancybox.min.css">
+
+  
+<meta name="generator" content="Hexo 5.4.0"></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/newblog/" id="logo">Tyxxzjpdez&#39;s Blog</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/newblog/">Home</a>
+        
+          <a class="main-nav-link" href="/newblog/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/newblog/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://tyxxzjpdez.github.io/newblog"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main"><article id="post-进程调度" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/" class="article-date">
+  <time class="dt-published" datetime="2021-09-19T17:49:17.000Z" itemprop="datePublished">2021-09-19</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="p-name article-title" itemprop="headline name">
+      Linux的进程调度
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <p>本文对Linux的进程调度做简单的总结，后续会随着理解的加深不断更新。本文的大部分内容基于《用“芯”探核：基于龙芯的Linux内核探索解析》，内核版本也依据书本为v5.4.x。</p>
+<h2 id="简介">简介</h2>
+<p>​		调度核心主要负责周期性时钟处理和进程切换，而调度类（目前主要包括实时调度类rt_sched_class，公平调度类fair_sched_class和空闲调度类idle_sched_class）主要负责进程组织和调度策略。其他诸如负载均衡（多处理器系统中用于避免一个处理器过于频繁而另一个处理器过于空闲的机制）、进程迁移等的话题则是调度核心和调度类协同操作的结果。不同的调度类之间具有绝对的优先顺序：实时进程永远优先于普通进程，而普通进程永远优先于空闲进程。</p>
+<p>​		本文暂时主要介绍三个调度类，其中重点介绍公平调度类CFS。</p>
+<h2 id="调度类">调度类</h2>
+<h3 id="公平调度类：CFS策略">公平调度类：CFS策略</h3>
+<p>本质上，完全公平算法就是<strong>希望让每个执行单位获得相同的执行时间</strong>。如果我们将优先级考虑进来，就可以这样描述：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">我们首先定义调度周期为将所有处于TASK_RUNNING状态的进程都调度一遍的时间，那每个进程实际应当分配的时间片应当满足下面的公式：</span><br><span class="line">                                                   </span><br><span class="line">                                                分配给进程的运行时间 = 调度周期 * 进程权重 / 所有进程权重之和</span><br></pre></td></tr></table></figure>
+<p>以上的公式是相当符合直觉的，简单来说其实就是每个进程的时间片大小与进程权重成正比。所以一个很简单的实现方式就是，直接按照上面的方式固定时间片让程序运行给定时间然后被抢占。具体实现可以利用时钟定期触发的中断记录当前进程此次调度执行的时间，并在发现累计超过给定时间片的时候将其睡眠，调入其他进程。这确实是一种简单有效的方式，实际上Linux也大概是在此基础上进行优化的。其中比较值得注意的是下面两个问题：</p>
+<ol>
+<li>
+<p><strong>如何设计进程的权重</strong>？如果是等差数列很容易导致优先级较高的两级之间与优先级较低的两级之间差距悬殊。举个例子，不是一般性，假设相邻优先级之间差1，比如现在有几个等待调度的进程的优先级是100，99，3，2。明明第一二的两个进程和第三四的两个进程都各自优先级只相差1，但是加权比例却很悬殊，也就是100/（100+99+3+2）与99/（100+99+3+2）很接近，但是3/（100+99+3+2）与2/（100+99+3+2）虽然绝对差距一致，但是前者相对比后者却多运行了一半时间。这不符合我们希望的优先级的设定，我们希望优先级n+1的进程比优先级n的进程CPU资源仅相差10%，所以我们显然应当设计为等比数列，所以它应当满足下式：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">1/(1+1*X) = 45%    =&gt;  X = 55/45 = 1.222</span><br></pre></td></tr></table></figure>
+<p>所以综上我们可以权重使得相邻权重成1.222倍比重，实际Linux大概是在1.24到1.25之间。</p>
+</li>
+<li>
+<p>如果确定要抢占，那<strong>应当将执行权交给谁呢</strong>？而且就算当前执行的进程还没用尽时间片，就一定不将它切换出去吗，如果<strong>有其他进程距离希望的时间片长度差距更远该怎么办呢</strong>？为了解决以上的问题，内核给每个进程维护了一个vruntime的变量，它是实际运行时间根据优先级权重归一化之后的虚拟运行时间。对于上面的第一个问题，我们直接选择vruntime最小的进程即可（考虑到进程频繁的创建和终止，所以采用红黑树进行维护）。而对于后面的问题，我们设计一个粒度值，如果当前进程的vruntime仅仅比最小的vruntime多出少于该粒度值的大小，那就不需要重新调度，否则就需要调度。</p>
+</li>
+</ol>
+<h3 id="实时调度类">实时调度类</h3>
+<p>为每个优先级维护一个队列。</p>
+<p><code>SCHED_RR</code>：实时进程调度策略，时间片轮转，进程用完时间片后加入优先级对应运行队列的尾部，把CPU让给同优先级的其他进程；</p>
+<p><code>SCHED_FIFO</code>：实时进程调度策略，先进先出调度没有时间片，没有更高优先级的情况下，只能等待主动让出CPU；</p>
+<h3 id="空闲调度类">空闲调度类</h3>
+<p>每个CPU都会有一个idle线程，当没有其他进程可以调度时，调度运行idle线程。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/" data-id="cktr5owas000dzzm8gvfj9jlx" data-title="Linux的进程调度" class="article-share-link">Share</a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/newblog/tags/Linux/" rel="tag">Linux</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/newblog/2021/09/09/%E5%A4%9A%E6%A0%B8%E7%BC%96%E7%A8%8B/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">多核编程</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/C/" rel="tag">C++</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/Linux/" rel="tag">Linux</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/SMP/" rel="tag">SMP</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/coroutine/" rel="tag">coroutine</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/debug/" rel="tag">debug</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/multi-thread/" rel="tag">multi-thread</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/notes/" rel="tag">notes</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/process/" rel="tag">process</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/roast/" rel="tag">roast</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/shell/" rel="tag">shell</a></li><li class="tag-list-item"><a class="tag-list-link" href="/newblog/tags/thread/" rel="tag">thread</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/newblog/tags/C/" style="font-size: 15px;">C++</a> <a href="/newblog/tags/Linux/" style="font-size: 20px;">Linux</a> <a href="/newblog/tags/SMP/" style="font-size: 10px;">SMP</a> <a href="/newblog/tags/coroutine/" style="font-size: 10px;">coroutine</a> <a href="/newblog/tags/debug/" style="font-size: 10px;">debug</a> <a href="/newblog/tags/multi-thread/" style="font-size: 10px;">multi-thread</a> <a href="/newblog/tags/notes/" style="font-size: 10px;">notes</a> <a href="/newblog/tags/process/" style="font-size: 10px;">process</a> <a href="/newblog/tags/roast/" style="font-size: 15px;">roast</a> <a href="/newblog/tags/shell/" style="font-size: 10px;">shell</a> <a href="/newblog/tags/thread/" style="font-size: 10px;">thread</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/newblog/archives/2021/09/">September 2021</a></li><li class="archive-list-item"><a class="archive-list-link" href="/newblog/archives/2021/08/">August 2021</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recent Posts</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/newblog/2021/09/19/%E8%BF%9B%E7%A8%8B%E8%B0%83%E5%BA%A6/">Linux的进程调度</a>
+          </li>
+        
+          <li>
+            <a href="/newblog/2021/09/09/%E5%A4%9A%E6%A0%B8%E7%BC%96%E7%A8%8B/">多核编程</a>
+          </li>
+        
+          <li>
+            <a href="/newblog/2021/09/09/gdb%E5%B8%B8%E7%94%A8%E8%B0%83%E8%AF%95%E6%8C%87%E4%BB%A4/">gdb常用调试指令</a>
+          </li>
+        
+          <li>
+            <a href="/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/">小点集锦</a>
+          </li>
+        
+          <li>
+            <a href="/newblog/2021/08/31/linux-shell-%E5%B8%B8%E7%94%A8%E5%91%BD%E4%BB%A4%E9%9B%86%E9%94%A6/">Linux shell 常用命令集锦</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2021 John Doe<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/newblog/" class="mobile-nav-link">Home</a>
+  
+    <a href="/newblog/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/newblog/js/jquery-3.4.1.min.js"></script>
+
+
+
+  
+<script src="/newblog/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/newblog/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>
