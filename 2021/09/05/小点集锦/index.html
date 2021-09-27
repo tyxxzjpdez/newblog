@@ -14,7 +14,7 @@
 <meta property="og:description" content="主要记录一些有点意思但又没有必要为此写新博客的一些点   迭代器的失效一般与容器类型相关，详见C++迭代器失效的几种情况总结。但是具体实现可能会有区别，例如vector的erase为了减小开销就使用拷贝然后销毁末尾的元素，这样的erase其实并不会让删除元素后面的所有迭代器失效，详见c++之你真的了解vector的erase吗   gcc编译链接的时候使用-v参数，可以显示具体的详细过程。我们可以">
 <meta property="og:locale" content="en_US">
 <meta property="article:published_time" content="2021-09-05T21:10:28.000Z">
-<meta property="article:modified_time" content="2021-09-19T11:58:21.392Z">
+<meta property="article:modified_time" content="2021-09-27T04:26:57.973Z">
 <meta property="article:author" content="John Doe">
 <meta property="article:tag" content="notes">
 <meta name="twitter:card" content="summary">
@@ -130,12 +130,40 @@
 </li>
 </ul>
 </li>
+<li>
+<p>spurious wakeup（虚假唤醒）</p>
+<p>主要摘自<a target="_blank" rel="noopener" href="https://www.zhihu.com/question/271521213">知乎邱昊宇的答案</a></p>
+<ul>
+<li>条件变量的等待被其他信号中断，这时候条件压根从来没有满足过，显然需要再次执行自旋</li>
+<li>明明有对应的唤醒，但条件不成立。主要是因为有其他线程在本线程重新加锁之前，已经获取锁改变了条件变量，并再释放锁。这时候本线程就需要再次检查条件变量是否满足条件。</li>
+</ul>
+<p>由于上面两个原因，条件变量的等待就需要被循环套住。</p>
+</li>
+<li>
+<p>C++中函数返回值一般是右值（除非返回值为左值引用），这样返回的时候如果不被右值引用绑定，就只能调用拷贝构造函数或者赋值函数保留值，这就多了开销。一般正常正确的使用中，如果返回为引用，一般不需要考虑生命周期的问题，因为设计为返回引用，返回值的周期必定比函数长，但如果不拷贝或赋值而是绑定，不保证生命周期意外提前结束（当然如果有智能指针的话，保证拷贝或者赋值语义就行，绝对不要绑定引用）。</p>
+</li>
+<li>
+<p>记住一点：函数返回和返回后被“接住”是两个过程。</p>
+</li>
+<li>
+<p>c++模板实现类型是否有某成员</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">include</span> <span class="meta-string">&lt;iostream&gt;</span></span></span><br><span class="line"></span><br><span class="line"><span class="keyword">template</span>&lt;<span class="keyword">typename</span> T&gt;</span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">has_no_destroy</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">  <span class="keyword">template</span> &lt;<span class="keyword">typename</span> C&gt; <span class="function"><span class="keyword">static</span> <span class="keyword">char</span> <span class="title">test</span><span class="params">(<span class="keyword">decltype</span>(&amp;C::no_destroy))</span></span>;</span><br><span class="line">  <span class="keyword">template</span> &lt;<span class="keyword">typename</span> C&gt; <span class="function"><span class="keyword">static</span> <span class="keyword">int32_t</span> <span class="title">test</span><span class="params">(...)</span></span>;</span><br><span class="line">  <span class="keyword">const</span> <span class="keyword">static</span> <span class="keyword">bool</span> value = <span class="built_in"><span class="keyword">sizeof</span></span>(test&lt;T&gt;(<span class="number">0</span>)) == <span class="number">1</span>;</span><br><span class="line">&#125;;</span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">A</span>&#123;</span></span><br><span class="line">    <span class="function"><span class="keyword">void</span> <span class="title">no_destroy</span><span class="params">()</span></span>;</span><br><span class="line">&#125;;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">main</span><span class="params">()</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">    std::cout&lt;&lt;has_no_destroy&lt;A&gt;::value&lt;&lt;std::endl;</span><br><span class="line">    <span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<ul>
+<li>所有函数只需要有函数声明，不需要有定义，运行时无开销</li>
+<li>使用返回值的字节大小来确定实例化了哪个模板（很妙）</li>
+<li>参数可以使用decltype灵活指定类型</li>
+<li>NULL(0)可以隐式地转为函数指针类型</li>
+</ul>
+</li>
+<li>
+<p>To be continued</p>
+</li>
 </ol>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cktr61qh0000by9m9bga3cp3a" data-title="小点集锦" class="article-share-link">Share</a>
+      <a data-url="http://tyxxzjpdez.github.io/newblog/2021/09/05/%E5%B0%8F%E7%82%B9%E9%9B%86%E9%94%A6/" data-id="cku25g2g9000bzao0ejo17rd2" data-title="小点集锦" class="article-share-link">Share</a>
       
       
       
