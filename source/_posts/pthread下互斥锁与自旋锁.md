@@ -12,7 +12,7 @@ tags:
 
 此处为了便于理解，仅仅展示伪代码（下图来自《Linux环境编程：从应用到内核》P307）
 
-<img src="/home/tyxxzjpdez/图片/2021-10-08 19-28-53屏幕截图.png" alt="2021-10-08 19-28-53屏幕截图"  />
+<img src="https://s3.bmp.ovh/imgs/2021/10/6f5da7efe7cd7f94.png"  />
 
 ### 核心思想
 
